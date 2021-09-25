@@ -393,16 +393,13 @@ if (!defined("DRIVER")) {
 		// SHOW DATABASES can take a very long time so it is cached
 		$return = get_session("dbs");
 		if ($return === null) {
-			$query = (min_version(5)
-				? "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME"
-				: "SHOW DATABASES"
-			); // SHOW DATABASES can be disabled by skip_show_database
+			$query = "SHOW DATABASES"; // SHOW DATABASES can be disabled by skip_show_database
 			$return = ($flush ? slow_query($query) : get_vals($query));
 			restart_session();
 			set_session("dbs", $return);
 			stop_session();
 		}
-		return $return;
+		return ["main"];
 	}
 
 	/** Formulate SQL query with limit
@@ -471,9 +468,9 @@ if (!defined("DRIVER")) {
 	* @return array array($name => $type)
 	*/
 	function tables_list() {
-		return get_key_vals(min_version(5)
+		return get_key_vals(min_version(6)
 			? "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME"
-			: "SHOW TABLES"
+			: "SHOW TABLES FROM main "
 		);
 	}
 
@@ -496,7 +493,7 @@ if (!defined("DRIVER")) {
 	*/
 	function table_status($name = "", $fast = false) {
 		$return = array();
-		foreach (get_rows($fast && min_version(5)
+		/*foreach (get_rows($fast && min_version(6)
 			? "SELECT TABLE_NAME AS Name, ENGINE AS Engine, TABLE_COMMENT AS Comment FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() " . ($name != "" ? "AND TABLE_NAME = " . q($name) : "ORDER BY Name")
 			: "SHOW TABLE STATUS" . ($name != "" ? " LIKE " . q(addcslashes($name, "%_\\")) : "")
 		) as $row) {
@@ -511,7 +508,7 @@ if (!defined("DRIVER")) {
 				return $row;
 			}
 			$return[$row["Name"]] = $row;
-		}
+		}*/
 		return $return;
 	}
 
@@ -538,10 +535,10 @@ if (!defined("DRIVER")) {
 	*/
 	function fields($table) {
 		$return = array();
-		foreach (get_rows("SHOW FULL COLUMNS FROM " . table($table)) as $row) {
+		foreach (get_rows("SHOW CREATE TABLE " . table($table)) as $row) {
 			preg_match('~^([^( ]+)(?:\((.+)\))?( unsigned)?( zerofill)?$~', $row["Type"], $match);
 			$return[$row["Field"]] = array(
-				"field" => $row["Field"],
+				"field" => $row["Create Table"],
 				"full_type" => $row["Type"],
 				"type" => $match[1],
 				"length" => $match[2],
