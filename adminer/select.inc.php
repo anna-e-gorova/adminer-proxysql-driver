@@ -235,9 +235,7 @@ if (isset($rights["insert"]) || !support("table")) {
 }
 $adminer->selectLinks($table_status, $set);
 
-$columns = ["*"];
 if (!$columns && support("table")) {
-	var_dump($columns);
 	echo "<p class='error'>" . lang('Unable to select the table') . ($fields ? "." : ": " . error()) . "\n";
 } else {
 	echo "<form action='' id='form'>\n";
