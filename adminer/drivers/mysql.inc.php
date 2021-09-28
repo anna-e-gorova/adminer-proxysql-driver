@@ -1083,6 +1083,7 @@ if (!defined("DRIVER")) {
 				}
 			}
 			queries("BEGIN");
+			queries("PRAGMA foreign_keys = 0");
 		}
 		foreach ($fields as $key => $field) {
 			$fields[$key] = "  " . implode($field);
@@ -1117,6 +1118,7 @@ if (!defined("DRIVER")) {
 					return false;
 				}
 			}
+			queries("PRAGMA foreign_keys = 1");
 			queries("COMMIT");
 		}
 		return true;
