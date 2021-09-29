@@ -923,16 +923,7 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function support($feature) {
-		return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|trigger|variables|view|view_trigger|processlist|kill)$~', $feature);
-	}
-
-	//need test by highload server
-	/** Kill a process
-	* @param int
-	* @return bool
-	*/
-	function kill_process($val) {
-		return queries("KILL " . number($val));
+		return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|trigger|variables|view|view_trigger|processlist)$~', $feature);
 	}
 
 	/** Return query to get connection ID
