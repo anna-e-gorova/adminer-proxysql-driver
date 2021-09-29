@@ -91,7 +91,7 @@ SET foreign_key_checks = 0;
 							$views[] = $name;
 						} elseif ($data) {
 							$fields = fields($name);
-							$adminer->dumpData($name, $_POST["data_style"], "SELECT *" . convert_fields($fields, $fields) . " FROM " . table($name));
+							$adminer->dumpData($name, $_POST["data_style"], "SELECT *" . convert_fields($fields, $fields) . " FROM " . ($adminer->database() ? $adminer->database() . "." : "") . table($name));
 						}
 						if ($is_sql && $_POST["triggers"] && $table && ($triggers = trigger_sql($name))) {
 							echo "\nDELIMITER ;;\n$triggers\nDELIMITER ;\n";

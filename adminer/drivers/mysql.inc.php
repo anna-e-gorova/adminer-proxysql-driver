@@ -6,7 +6,7 @@ if (!defined("DRIVER")) {
 	// MySQLi supports everything, MySQL doesn't support multiple result sets, PDO_MySQL doesn't support orgtable
 	if (extension_loaded("mysqli")) {
 		class Min_DB extends MySQLi {
-			var $extension = "ProxySQL";
+			var $extension = "MySQLi";
 
 			function __construct() {
 				parent::init();
@@ -362,7 +362,6 @@ if (!defined("DRIVER")) {
 		return idf_escape($idf);
 	}
 
-	//HARD-LAST
 	/** Connect to the database
 	* @return mixed Min_DB or string for error
 	*/
@@ -386,7 +385,6 @@ if (!defined("DRIVER")) {
 		return $return;
 	}
 
-	//work, was fixed
 	/** Get cached list of databases
 	* @param bool
 	* @return array
@@ -395,8 +393,11 @@ if (!defined("DRIVER")) {
 		// SHOW DATABASES can take a very long time so it is cached
 		$return = get_session("dbs");
 		if ($return === null) {
-			$query = "SHOW DATABASES"; // SHOW DATABASES can be disabled by skip_show_database
-			$return = get_vals($query, 1);
+			$query = (min_version(5)
+				? "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA ORDER BY SCHEMA_NAME"
+				: "SHOW DATABASES"
+			); // SHOW DATABASES can be disabled by skip_show_database
+			$return = ($flush ? slow_query($query) : get_vals($query));
 			restart_session();
 			set_session("dbs", $return);
 			stop_session();
@@ -427,18 +428,6 @@ if (!defined("DRIVER")) {
 		return limit($query, $where, 1, 0, $separator);
 	}
 
-	//fromsqlite
-	/*
-	function limit1($table, $query, $where, $separator = "\n") {
-		global $connection;
-		return (preg_match('~^INTO~', $query) || $connection->result("SELECT sqlite_compileoption_used('ENABLE_UPDATE_DELETE_LIMIT')")
-			? limit($query, $where, 1, 0, $separator)
-			: " $query WHERE rowid = (SELECT rowid FROM " . table($table) . $where . $separator . "LIMIT 1)" //! use primary key in tables with WITHOUT rowid
-		);
-	}
-	*/
-
-	//need check
 	/** Get database collation
 	* @param string
 	* @param array result of collations()
@@ -457,67 +446,37 @@ if (!defined("DRIVER")) {
 		return $return;
 	}
 
-	/*from sqlite
-	function db_collation($db, $collations) {
-		global $connection;
-		return $connection->result("PRAGMA encoding"); // there is no database list so $db == DB
-	}
-	*/
-
-	//may be not work, sqlite: return array();
 	/** Get supported engines
 	* @return array
 	*/
-	/*not work
 	function engines() {
 		$return = array();
-		foreach (get_rows("SHOWi ENGINES") as $row) {
+		foreach (get_rows("SHOW ENGINES") as $row) {
 			if (preg_match("~YES|DEFAULT~", $row["Support"])) {
 				$return[] = $row["Engine"];
 			}
 		}
 		return $return;
-	}*/
-
-	//
-	function engines() {
-		return array();
 	}
 
-	//not work
 	/** Get logged user
 	* @return string
 	*/
-	/*function logged_user() {
+	function logged_user() {
 		global $connection;
 		return $connection->result("SELECT USER()");
-	}*/
-
-	//not work, write apache
-	function logged_user() {
-		return get_current_user(); // should return effective user
 	}
 
-	//work, but dont show views
 	/** Get tables list
 	* @return array array($name => $type)
 	*/
-	/*function tables_list() {
-		global $adminer;
-		return get_key_vals("SHOW TABLES FROM " . $adminer->database());
-	}*/
-
 	function tables_list() {
-		global $adminer;
-		return get_key_vals("SELECT name, type FROM " . $adminer->database() . ".sqlite_master WHERE type IN ('table', 'view') ORDER BY (name = 'sqlite_sequence'), name");
+		return get_key_vals(min_version(5)
+			? "SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME"
+			: "SHOW TABLES"
+		);
 	}
 
-	//from sqlite
-	/*function tables_list() {
-		return get_key_vals("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY (name = 'sqlite_sequence'), name");
-	}*/
-
-	//work, may be
 	/** Count tables in all databases
 	* @param array
 	* @return array array($db => $tables)
@@ -535,9 +494,9 @@ if (!defined("DRIVER")) {
 	* @param bool return only "Name", "Engine" and "Comment" fields
 	* @return array array($name => array("Name" => , "Engine" => , "Comment" => , "Oid" => , "Rows" => , "Collation" => , "Auto_increment" => , "Data_length" => , "Index_length" => , "Data_free" => )) or only inner array with $name
 	*/
-	/*function table_status($name = "", $fast = false) {
+	function table_status($name = "", $fast = false) {
 		$return = array();
-		foreach (get_rows($fast && min_version(6)
+		foreach (get_rows($fast && min_version(5)
 			? "SELECT TABLE_NAME AS Name, ENGINE AS Engine, TABLE_COMMENT AS Comment FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() " . ($name != "" ? "AND TABLE_NAME = " . q($name) : "ORDER BY Name")
 			: "SHOW TABLE STATUS" . ($name != "" ? " LIKE " . q(addcslashes($name, "%_\\")) : "")
 		) as $row) {
@@ -554,64 +513,35 @@ if (!defined("DRIVER")) {
 			$return[$row["Name"]] = $row;
 		}
 		return $return;
-	}*/
-
-	//NEED REPAIR work only main
-	function table_status($name = "") {
-		global $connection;
-		global $adminer;
-		$return = array();
-		foreach (get_rows("SELECT name AS Name, type AS Engine, 'rowid' AS Oid, '' AS Auto_increment FROM " . $adminer->database() . ".sqlite_master WHERE type IN ('table', 'view') " . ($name != "" ? "AND name = " . q($name) : "ORDER BY name")) as $row) {
-			$row["Rows"] = $connection->result("SELECT COUNT(*) FROM " . idf_escape($row["Name"]));
-			$return[$row["Name"]] = $row;
-		}
-		foreach (get_rows("SELECT * FROM sqlite_sequence", null, "") as $row) {
-			$return[$row["name"]]["Auto_increment"] = $row["seq"];
-		}
-		return ($name != "" ? $return[$name] : $return);
 	}
 
-	//nor work
 	/** Find out whether the identifier is view
 	* @param array
 	* @return bool
 	*/
-	/*function is_view($table_status) {
-		return $table_status["Engine"] === null;
-	}*/
-
-	//from sqlite
 	function is_view($table_status) {
-		return $table_status["Engine"] == "view";
+		return $table_status["Engine"] === null;
 	}
 
 	/** Check if table supports foreign keys
 	* @param array result of table_status
 	* @return bool
 	*/
-	/*
 	function fk_support($table_status) {
 		return preg_match('~InnoDB|IBMDB2I~i', $table_status["Engine"])
 			|| (preg_match('~NDB~i', $table_status["Engine"]) && min_version(5.6));
-	}
-	*/
-	//from sqlite
-	function fk_support($table_status) {
-		global $connection;
-		return !$connection->result("SELECT sqlite_compileoption_used('OMIT_FOREIGN_KEY')");
 	}
 
 	/** Get information about fields
 	* @param string
 	* @return array array($name => array("field" => , "full_type" => , "type" => , "length" => , "unsigned" => , "default" => , "null" => , "auto_increment" => , "on_update" => , "collation" => , "privileges" => , "comment" => , "primary" => ))
 	*/
-	/*
 	function fields($table) {
 		$return = array();
-		foreach (get_rows("SHOW CREATE TABLE " . table($table)) as $row) {
+		foreach (get_rows("SHOW FULL COLUMNS FROM " . table($table)) as $row) {
 			preg_match('~^([^( ]+)(?:\((.+)\))?( unsigned)?( zerofill)?$~', $row["Type"], $match);
 			$return[$row["Field"]] = array(
-				"field" => substr($row["Create Table"], 0, 4),
+				"field" => $row["Field"],
 				"full_type" => $row["Type"],
 				"type" => $match[1],
 				"length" => $match[2],
@@ -629,76 +559,13 @@ if (!defined("DRIVER")) {
 			);
 		}
 		return $return;
-	}*/
-
-	//from sqlite, not full
-	/*function fields($table) {
-		$return = array();
-		global $connection;
-		$return = array();
-		$primary = "";
-		foreach (get_rows("PRAGMA table_info(" . table($table) . ")") as $row) {
-			$name = $row["name"];
-			$type = strtolower($row["type"]);
-			$default = $row["dflt_value"];
-			$return[$name] = array(
-				"field" => $name,
-				"type" => (preg_match('~int~i', $type) ? "integer" : (preg_match('~char|clob|text~i', $type) ? "text" : (preg_match('~blob~i', $type) ? "blob" : (preg_match('~real|floa|doub~i', $type) ? "real" : "numeric")))),
-				"full_type" => $type,
-				"default" => (preg_match("~'(.*)'~", $default, $match) ? str_replace("''", "'", $match[1]) : ($default == "NULL" ? null : $default)),
-				"null" => !$row["notnull"],
-				"privileges" => array("select" => 1, "insert" => 1, "update" => 1),
-				"primary" => $row["pk"],
-			);
-		}
-		return $return;
-	}*/
-
-	//from sqlite full
-	function fields($table) {
-		global $connection;
-		$return = array();
-		$primary = "";
-		foreach (get_rows("PRAGMA table_info(" . table($table) . ")") as $row) {
-			$name = $row["name"];
-			$type = strtolower($row["type"]);
-			$default = $row["dflt_value"];
-			$return[$name] = array(
-				"field" => $name,
-				"type" => (preg_match('~int~i', $type) ? "integer" : (preg_match('~char|clob|text~i', $type) ? "text" : (preg_match('~blob~i', $type) ? "blob" : (preg_match('~real|floa|doub~i', $type) ? "real" : "numeric")))),
-				"full_type" => $type,
-				"default" => (preg_match("~'(.*)'~", $default, $match) ? str_replace("''", "'", $match[1]) : ($default == "NULL" ? null : $default)),
-				"null" => !$row["notnull"],
-				"privileges" => array("select" => 1, "insert" => 1, "update" => 1),
-				"primary" => $row["pk"],
-			);
-			if ($row["pk"]) {
-				if ($primary != "") {
-					$return[$primary]["auto_increment"] = false;
-				} elseif (preg_match('~^integer$~i', $type)) {
-					$return[$name]["auto_increment"] = true;
-				}
-				$primary = $name;
-			}
-		}
-		$sql = $connection->result("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = " . q($table));
-		preg_match_all('~(("[^"]*+")+|[a-z0-9_]+)\s+text\s+COLLATE\s+(\'[^\']+\'|\S+)~i', $sql, $matches, PREG_SET_ORDER);
-		foreach ($matches as $match) {
-			$name = str_replace('""', '"', preg_replace('~^"|"$~', '', $match[1]));
-			if ($return[$name]) {
-				$return[$name]["collation"] = trim($match[3], "'");
-			}
-		}
-		return $return;
 	}
 
-	//was error
 	/** Get table indexes
 	* @param string
 	* @param string Min_DB to use
 	* @return array array($key_name => array("type" => , "columns" => array(), "lengths" => array(), "descs" => array()))
 	*/
-	/*
 	function indexes($table, $connection2 = null) {
 		$return = array();
 		foreach (get_rows("SHOW INDEX FROM " . table($table), $connection2) as $row) {
@@ -710,62 +577,11 @@ if (!defined("DRIVER")) {
 		}
 		return $return;
 	}
-	*/
 
-	//from sqlite
-	function indexes($table, $connection2 = null) {
-		global $connection;
-		if (!is_object($connection2)) {
-			$connection2 = $connection;
-		}
-		$return = array();
-		$sql = $connection2->result("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = " . q($table));
-		if (preg_match('~\bPRIMARY\s+KEY\s*\((([^)"]+|"[^"]*"|`[^`]*`)++)~i', $sql, $match)) {
-			$return[""] = array("type" => "PRIMARY", "columns" => array(), "lengths" => array(), "descs" => array());
-			preg_match_all('~((("[^"]*+")+|(?:`[^`]*+`)+)|(\S+))(\s+(ASC|DESC))?(,\s*|$)~i', $match[1], $matches, PREG_SET_ORDER);
-			foreach ($matches as $match) {
-				$return[""]["columns"][] = idf_unescape($match[2]) . $match[4];
-				$return[""]["descs"][] = (preg_match('~DESC~i', $match[5]) ? '1' : null);
-			}
-		}
-		if (!$return) {
-			foreach (fields($table) as $name => $field) {
-				if ($field["primary"]) {
-					$return[""] = array("type" => "PRIMARY", "columns" => array($name), "lengths" => array(), "descs" => array(null));
-				}
-			}
-		}
-		$sqls = get_key_vals("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = " . q($table), $connection2);
-		foreach (get_rows("PRAGMA index_list(" . table($table) . ")", $connection2) as $row) {
-			$name = $row["name"];
-			$index = array("type" => ($row["unique"] ? "UNIQUE" : "INDEX"));
-			$index["lengths"] = array();
-			$index["descs"] = array();
-			foreach (get_rows("PRAGMA index_info(" . idf_escape($name) . ")", $connection2) as $row1) {
-				$index["columns"][] = $row1["name"];
-				$index["descs"][] = null;
-			}
-			if (preg_match('~^CREATE( UNIQUE)? INDEX ' . preg_quote(idf_escape($name) . ' ON ' . idf_escape($table), '~') . ' \((.*)\)$~i', $sqls[$name], $regs)) {
-				preg_match_all('/("[^"]*+")+( DESC)?/', $regs[2], $matches);
-				foreach ($matches[2] as $key => $val) {
-					if ($val) {
-						$index["descs"][$key] = '1';
-					}
-				}
-			}
-			if (!$return[""] || $index["type"] != "UNIQUE" || $index["columns"] != $return[""]["columns"] || $index["descs"] != $return[""]["descs"] || !preg_match("~^sqlite_~", $name)) {
-				$return[$name] = $index;
-			}
-		}
-		return $return;
-	}
-
-	//was error
 	/** Get foreign keys in table
 	* @param string
 	* @return array array($name => array("db" => , "ns" => , "table" => , "source" => array(), "target" => array(), "on_delete" => , "on_update" => ))
 	*/
-	/*
 	function foreign_keys($table) {
 		global $connection, $on_actions;
 		static $pattern = '(?:`(?:[^`]|``)+`|"(?:[^"]|"")+")';
@@ -788,36 +604,14 @@ if (!defined("DRIVER")) {
 		}
 		return $return;
 	}
-	*/
-	//from sqlite
-	function foreign_keys($table) {
-		$return = array();
-		foreach (get_rows("PRAGMA foreign_key_list(" . table($table) . ")") as $row) {
-			$foreign_key = &$return[$row["id"]];
-			//! idf_unescape in SQLite2
-			if (!$foreign_key) {
-				$foreign_key = $row;
-			}
-			$foreign_key["source"][] = $row["from"];
-			$foreign_key["target"][] = $row["to"];
-		}
-		return $return;
-	}
 
-	//not working
 	/** Get view SELECT
 	* @param string
 	* @return array array("select" => )
 	*/
-	/*
 	function view($name) {
 		global $connection;
 		return array("select" => preg_replace('~^(?:[^`]|`[^`]*`)*\s+AS\s+~isU', '', $connection->result("SHOW CREATE VIEW " . table($name), 1)));
-	}*/
-	//from sqlite
-	function view($name) {
-		global $connection;
-		return array("select" => preg_replace('~^(?:[^`"[]+|`[^`]*`|"[^"]*")* AS\s+~iU', '', $connection->result("SELECT sql FROM sqlite_master WHERE name = " . q($name)))); //! identifiers may be inside []
 	}
 
 	/** Get sorted grouped list of collations
@@ -839,26 +633,13 @@ if (!defined("DRIVER")) {
 		return $return;
 	}
 
-	//from sqlite
-	/*
-	function collations() {
-		return (isset($_GET["create"]) ? get_vals("PRAGMA collation_list", 1) : array());
-	}
-	*/
-
-	//not working
 	/** Find out if database is information_schema
 	* @param string
 	* @return bool
 	*/
-	/*function information_schema($db) {
+	function information_schema($db) {
 		return (min_version(5) && $db == "information_schema")
 			|| (min_version(5.5) && $db == "performance_schema");
-	}*/
-
-	//from sqlite
-	function information_schema($db) {
-		return false;
 	}
 
 	/** Get escaped error message
@@ -868,14 +649,7 @@ if (!defined("DRIVER")) {
 		global $connection;
 		return h(preg_replace('~^You have an error.*syntax to use~U', "Syntax error", $connection->error));
 	}
-	//from sqlite, not diff
-	/*function error() {
-		global $connection;
-		return h($connection->error);
-	}*/
 
-
-	//not need?
 	/** Create database
 	* @param string
 	* @param string
@@ -884,7 +658,7 @@ if (!defined("DRIVER")) {
 	function create_database($db, $collation) {
 		return queries("CREATE DATABASE " . idf_escape($db) . ($collation ? " COLLATE " . q($collation) : ""));
 	}
-	//not need?
+
 	/** Drop databases
 	* @param array
 	* @return bool
@@ -895,7 +669,7 @@ if (!defined("DRIVER")) {
 		set_session("dbs", null);
 		return $return;
 	}
-	//not need?
+
 	/** Rename database from DB
 	* @param string new name
 	* @param string
@@ -919,7 +693,6 @@ if (!defined("DRIVER")) {
 		return $return;
 	}
 
-	//need? how check?
 	/** Generate modifier for auto increment column
 	* @return string
 	*/
@@ -939,12 +712,7 @@ if (!defined("DRIVER")) {
 		}
 		return " AUTO_INCREMENT$auto_increment_index";
 	}
-	/*from sqlite
-	function auto_increment() {
-		return " PRIMARY KEY" . (DRIVER == "sqlite" ? " AUTOINCREMENT" : "");
-	}*/
 
-	//HARD-LAST
 	/** Run commands to create or alter table
 	* @param string "" to create
 	* @param string new name
@@ -957,7 +725,7 @@ if (!defined("DRIVER")) {
 	* @param string
 	* @return bool
 	*/
-	/*function alter_table($table, $name, $fields, $foreign, $comment, $engine, $collation, $auto_increment, $partitioning) {
+	function alter_table($table, $name, $fields, $foreign, $comment, $engine, $collation, $auto_increment, $partitioning) {
 		$alter = array();
 		foreach ($fields as $field) {
 			$alter[] = ($field[1]
@@ -981,164 +749,14 @@ if (!defined("DRIVER")) {
 			$alter[] = ltrim($status);
 		}
 		return ($alter || $partitioning ? queries("ALTER TABLE " . table($table) . "\n" . implode(",\n", $alter) . $partitioning) : true);
-	}*/
-
-	function alter_table($table, $name, $fields, $foreign, $comment, $engine, $collation, $auto_increment, $partitioning) {
-		global $connection;
-		$use_all_fields = ($table == "" || $foreign);
-		foreach ($fields as $field) {
-			if ($field[0] != "" || !$field[1] || $field[2]) {
-				$use_all_fields = true;
-				break;
-			}
-		}
-		$alter = array();
-		$originals = array();
-		foreach ($fields as $field) {
-			if ($field[1]) {
-				$alter[] = ($use_all_fields ? $field[1] : "ADD " . implode($field[1]));
-				if ($field[0] != "") {
-					$originals[$field[0]] = $field[1][0];
-				}
-			}
-		}
-		
-		if (!$use_all_fields) {
-			foreach ($alter as $val) {
-				if (!queries("ALTER TABLE " . table($table) . " $val")) {
-					return false;
-				}
-			}
-			if ($table != $name && !queries("ALTER TABLE " . table($table) . " RENAME TO " . table($name))) {
-				return false;
-			}
-		} elseif (!recreate_table($table, $name, $alter, $originals, $foreign, $auto_increment)) {
-			return false;
-		}
-		if ($auto_increment) {
-			queries("BEGIN");
-			queries("UPDATE sqlite_sequence SET seq = $auto_increment WHERE name = " . q($name)); // ignores error
-			if (!$connection->affected_rows) {
-				queries("INSERT INTO sqlite_sequence (name, seq) VALUES (" . q($name) . ", $auto_increment)");
-			}
-			queries("COMMIT");
-		}
-		return true;
 	}
 
-	function recreate_table($table, $name, $fields, $originals, $foreign, $auto_increment, $indexes = array()) {
-		global $connection;
-		if ($table != "") {
-			if (!$fields) {
-				foreach (fields($table) as $key => $field) {
-					if ($indexes) {
-						$field["auto_increment"] = 0;
-					}
-					$fields[] = process_field($field, $field);
-					$originals[$key] = idf_escape($key);
-				}
-			}
-			$primary_key = false;
-			foreach ($fields as $field) {
-				if ($field[6]) {
-					$primary_key = true;
-				}
-			}
-			$drop_indexes = array();
-			foreach ($indexes as $key => $val) {
-				if ($val[2] == "DROP") {
-					$drop_indexes[$val[1]] = true;
-					unset($indexes[$key]);
-				}
-			}
-			foreach (indexes($table) as $key_name => $index) {
-				$columns = array();
-				foreach ($index["columns"] as $key => $column) {
-					if (!$originals[$column]) {
-						continue 2;
-					}
-					$columns[] = $originals[$column] . ($index["descs"][$key] ? " DESC" : "");
-				}
-				if (!$drop_indexes[$key_name]) {
-					if ($index["type"] != "PRIMARY" || !$primary_key) {
-						$indexes[] = array($index["type"], $key_name, $columns);
-					}
-				}
-			}
-			foreach ($indexes as $key => $val) {
-				if ($val[0] == "PRIMARY") {
-					unset($indexes[$key]);
-					$foreign[] = "  PRIMARY KEY (" . implode(", ", $val[2]) . ")";
-				}
-			}
-			foreach (foreign_keys($table) as $key_name => $foreign_key) {
-				foreach ($foreign_key["source"] as $key => $column) {
-					if (!$originals[$column]) {
-						continue 2;
-					}
-					$foreign_key["source"][$key] = idf_unescape($originals[$column]);
-				}
-				if (!isset($foreign[" $key_name"])) {
-					$foreign[] = " " . format_foreign_key($foreign_key);
-				}
-			}
-			queries("BEGIN");
-			queries("PRAGMA foreign_keys = 0");
-		}
-		foreach ($fields as $key => $field) {
-			$fields[$key] = "  " . implode($field);
-		}
-		$fields = array_merge($fields, array_filter($foreign));
-		$temp_name = ($table == $name ? "adminer_$name" : $name);
-		if (!queries("CREATE TABLE " . table($temp_name) . " (\n" . implode(",\n", $fields) . "\n)")) {
-			// implicit ROLLBACK to not overwrite $connection->error
-			return false;
-		}
-		if ($table != "") {
-			if ($originals && !queries("INSERT INTO " . table($temp_name) . " (" . implode(", ", $originals) . ") SELECT " . implode(", ", array_map('idf_escape', array_keys($originals))) . " FROM " . table($table))) {
-				return false;
-			}
-			$triggers = array();
-			foreach (triggers($table) as $trigger_name => $timing_event) {
-				$trigger = trigger($trigger_name);
-				$triggers[] = "CREATE TRIGGER " . idf_escape($trigger_name) . " " . implode(" ", $timing_event) . " ON " . table($name) . "\n$trigger[Statement]";
-			}
-			$auto_increment = $auto_increment ? 0 : $connection->result("SELECT seq FROM sqlite_sequence WHERE name = " . q($table)); // if $auto_increment is set then it will be updated later
-			if (!queries("DROP TABLE " . table($table)) // drop before creating indexes and triggers to allow using old names
-				|| ($table == $name && !queries("ALTER TABLE " . table($temp_name) . " RENAME TO " . table($name)))
-				|| !alter_indexes($name, $indexes)
-			) {
-				return false;
-			}
-			if ($auto_increment) {
-				queries("UPDATE sqlite_sequence SET seq = $auto_increment WHERE name = " . q($name)); // ignores error
-			}
-			foreach ($triggers as $trigger) {
-				if (!queries($trigger)) {
-					return false;
-				}
-			}
-			queries("PRAGMA foreign_keys = 1");
-			queries("COMMIT");
-		}
-		return true;
-	}
-
-	function index_sql($table, $type, $name, $columns) {
-		return "CREATE $type " . ($type != "INDEX" ? "INDEX " : "")
-			. idf_escape($name != "" ? $name : uniqid($table . "_"))
-			. " ON " . table($table)
-			. " $columns"
-		;
-	}
-
-	//not working
 	/** Run commands to alter indexes
 	* @param string escaped table name
 	* @param array of array("index type", "name", array("column definition", ...)) or array("index type", "name", "DROP")
 	* @return bool
 	*/
-	/*function alter_indexes($table, $alter) {
+	function alter_indexes($table, $alter) {
 		foreach ($alter as $key => $val) {
 			$alter[$key] = ($val[2] == "DROP"
 				? "\nDROP INDEX " . idf_escape($val[1])
@@ -1146,76 +764,32 @@ if (!defined("DRIVER")) {
 			);
 		}
 		return queries("ALTER TABLE " . table($table) . implode(",", $alter));
-	}*/
-	
-	/*from sqlite 500
-	need func recreate and etc*/
-	function alter_indexes($table, $alter) {
-		foreach ($alter as $primary) {
-			if ($primary[0] == "PRIMARY") {
-				return recreate_table($table, $table, array(), array(), array(), 0, $alter);
-			}
-		}
-		foreach (array_reverse($alter) as $val) {
-			if (!queries($val[2] == "DROP"
-				? "DROP INDEX " . idf_escape($val[1])
-				: index_sql($table, $val[0], $val[1], "(" . implode(", ", $val[2]) . ")")
-			)) {
-				return false;
-			}
-		}
-		return true;
 	}
-	
 
-
-	//not working
 	/** Run commands to truncate tables
 	* @param array
 	* @return bool
 	*/
-	/*
 	function truncate_tables($tables) {
 		return apply_queries("TRUNCATE TABLE", $tables);
 	}
-	*/
 
-	//from sqlite
-	function truncate_tables($tables) {
-		return apply_queries("DELETE FROM", $tables);
-	}
-
-	//not work for >1
 	/** Drop views
 	* @param array
 	* @return bool
 	*/
-	/*
 	function drop_views($views) {
 		return queries("DROP VIEW " . implode(", ", array_map('table', $views)));
-	}*/
-
-	//from sqlite
-	function drop_views($views) {
-		return apply_queries("DROP VIEW", $views);
 	}
 
-	//not work for >1
 	/** Drop tables
 	* @param array
 	* @return bool
 	*/
-	/*
 	function drop_tables($tables) {
 		return queries("DROP TABLE " . implode(", ", array_map('table', $tables)));
-	}*/
-
-	//from sqlite
-	function drop_tables($tables) {
-		return apply_queries("DROP TABLE", $tables);
 	}
 
-	//need?
 	/** Move tables to other schema
 	* @param array
 	* @param array
@@ -1246,7 +820,6 @@ if (!defined("DRIVER")) {
 		return false;
 	}
 
-	//need?
 	/** Copy tables to other schema
 	* @param array
 	* @param array
@@ -1281,12 +854,10 @@ if (!defined("DRIVER")) {
 		return true;
 	}
 
-	//not working
 	/** Get information about trigger
 	* @param string trigger name
 	* @return array array("Trigger" => , "Timing" => , "Event" => , "Of" => , "Type" => , "Statement" => )
 	*/
-	/*
 	function trigger($name) {
 		if ($name == "") {
 			return array();
@@ -1294,37 +865,11 @@ if (!defined("DRIVER")) {
 		$rows = get_rows("SHOW TRIGGERS WHERE `Trigger` = " . q($name));
 		return reset($rows);
 	}
-	*/
 
-	//from sqlite, need checked from diferent databases
-	function trigger($name) {
-		global $connection;
-		if ($name == "") {
-			return array("Statement" => "BEGIN\n\t;\nEND");
-		}
-		$idf = '(?:[^`"\s]+|`[^`]*`|"[^"]*")+';
-		$trigger_options = trigger_options();
-		preg_match(
-			"~^CREATE\\s+TRIGGER\\s*$idf\\s*(" . implode("|", $trigger_options["Timing"]) . ")\\s+([a-z]+)(?:\\s+OF\\s+($idf))?\\s+ON\\s*$idf\\s*(?:FOR\\s+EACH\\s+ROW\\s)?(.*)~is",
-			$connection->result("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = " . q($name)),
-			$match
-		);
-		$of = $match[3];
-		return array(
-			"Timing" => strtoupper($match[1]),
-			"Event" => strtoupper($match[2]) . ($of ? " OF" : ""),
-			"Of" => idf_unescape($of),
-			"Trigger" => $name,
-			"Statement" => $match[4],
-		);
-	}
-
-	//not working query
 	/** Get defined triggers
 	* @param string
 	* @return array array($name => array($timing, $event))
 	*/
-	/*
 	function triggers($table) {
 		$return = array();
 		foreach (get_rows("SHOW TRIGGERS LIKE " . q(addcslashes($table, "%_\\"))) as $row) {
@@ -1332,53 +877,28 @@ if (!defined("DRIVER")) {
 		}
 		return $return;
 	}
-	*/
 
-	//from sqlite
-	function triggers($table) {
-		$return = array();
-		$trigger_options = trigger_options();
-		foreach (get_rows("SELECT * FROM sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)) as $row) {
-			preg_match('~^CREATE\s+TRIGGER\s*(?:[^`"\s]+|`[^`]*`|"[^"]*")+\s*(' . implode("|", $trigger_options["Timing"]) . ')\s*(.*?)\s+ON\b~i', $row["sql"], $match);
-			$return[$row["name"]] = array($match[1], $match[2]);
-		}
-		return $return;
-	}
-
-	//mysql driver origin - less option
 	/** Get trigger options
 	* @return array ("Timing" => array(), "Event" => array(), "Type" => array())
 	*/
-	/*
 	function trigger_options() {
 		return array(
 			"Timing" => array("BEFORE", "AFTER"),
 			"Event" => array("INSERT", "UPDATE", "DELETE"),
 			"Type" => array("FOR EACH ROW"),
 		);
-	}*/
-
-	//from sqlite - more options
-	function trigger_options() {
-		return array(
-			"Timing" => array("BEFORE", "AFTER", "INSTEAD OF"),
-			"Event" => array("INSERT", "UPDATE", "UPDATE OF", "DELETE"),
-			"Type" => array("FOR EACH ROW"),
-		);
 	}
 
-	//not supported
 	/** Get information about stored routine
 	* @param string
 	* @param string "FUNCTION" or "PROCEDURE"
 	* @return array ("fields" => array("field" => , "type" => , "length" => , "unsigned" => , "inout" => , "collation" => ), "returns" => , "definition" => , "language" => )
 	*/
-	/*
 	function routine($name, $type) {
 		global $connection, $enum_length, $inout, $types;
 		$aliases = array("bool", "boolean", "integer", "double precision", "real", "dec", "numeric", "fixed", "national char", "national varchar");
-	*///$space = "(?:\\s|/\\*[\s\S]*?\\*/|(?:#|-- )[^\n]*\n?|--\r?\n)";
-		/*$type_pattern = "((" . implode("|", array_merge(array_keys($types), $aliases)) . ")\\b(?:\\s*\\(((?:[^'\")]|$enum_length)++)\\))?\\s*(zerofill\\s*)?(unsigned(?:\\s+zerofill)?)?)(?:\\s*(?:CHARSET|CHARACTER\\s+SET)\\s*['\"]?([^'\"\\s,]+)['\"]?)?";
+		$space = "(?:\\s|/\\*[\s\S]*?\\*/|(?:#|-- )[^\n]*\n?|--\r?\n)";
+		$type_pattern = "((" . implode("|", array_merge(array_keys($types), $aliases)) . ")\\b(?:\\s*\\(((?:[^'\")]|$enum_length)++)\\))?\\s*(zerofill\\s*)?(unsigned(?:\\s+zerofill)?)?)(?:\\s*(?:CHARSET|CHARACTER\\s+SET)\\s*['\"]?([^'\"\\s,]+)['\"]?)?";
 		$pattern = "$space*(" . ($type == "FUNCTION" ? "" : $inout) . ")?\\s*(?:`((?:[^`]|``)*)`\\s*|\\b(\\S+)\\s+)$type_pattern";
 		$create = $connection->result("SHOW CREATE $type " . idf_escape($name), 2);
 		preg_match("~\\(((?:$pattern\\s*,?)*)\\)\\s*" . ($type == "FUNCTION" ? "RETURNS\\s+$type_pattern\\s+" : "") . "(.*)~is", $create, $match);
@@ -1405,17 +925,14 @@ if (!defined("DRIVER")) {
 			"definition" => $match[17],
 			"language" => "SQL", // available in information_schema.ROUTINES.PARAMETER_STYLE
 		);
-	}*/
+	}
 
-	//not supported
 	/** Get list of routines
 	* @return array ("SPECIFIC_NAME" => , "ROUTINE_NAME" => , "ROUTINE_TYPE" => , "DTD_IDENTIFIER" => )
 	*/
-	/*
 	function routines() {
 		return get_rows("SELECT ROUTINE_NAME AS SPECIFIC_NAME, ROUTINE_NAME, ROUTINE_TYPE, DTD_IDENTIFIER FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = " . q(DB));
 	}
-	*/
 
 	/** Get list of available routine languages
 	* @return array
@@ -1433,7 +950,6 @@ if (!defined("DRIVER")) {
 		return idf_escape($name);
 	}
 
-	//mb not need, no such function: LAST_INSERT_ID, but sqlite too
 	/** Get last auto increment ID
 	* @return string
 	*/
@@ -1442,7 +958,6 @@ if (!defined("DRIVER")) {
 		return $connection->result("SELECT LAST_INSERT_ID()"); // mysql_insert_id() truncates bigint
 	}
 
-	//work such and such, but different need checked
 	/** Explain select
 	* @param Min_DB
 	* @param string
@@ -1451,13 +966,7 @@ if (!defined("DRIVER")) {
 	function explain($connection, $query) {
 		return $connection->query("EXPLAIN " . (min_version(5.1) && !min_version(5.7) ? "PARTITIONS " : "") . $query);
 	}
-	/*from sqlite
-	function explain($connection, $query) {
-		return $connection->query("EXPLAIN QUERY PLAN $query");
-	}
-	*/
 
-	//need check, sql have, but empty
 	/** Get approximate number of rows
 	* @param array
 	* @param array
@@ -1497,7 +1006,6 @@ if (!defined("DRIVER")) {
 		return true;
 	}
 
-	//need check
 	/** Get SQL command to create table
 	* @param string
 	* @param bool
@@ -1513,35 +1021,14 @@ if (!defined("DRIVER")) {
 		return $return;
 	}
 
-	/*from sqlite
-	function create_sql($table, $auto_increment, $style) {
-		global $connection;
-		$return = $connection->result("SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = " . q($table));
-		foreach (indexes($table) as $name => $index) {
-			if ($name == '') {
-				continue;
-			}
-			$return .= ";\n\n" . index_sql($table, $index['type'], $name, "(" . implode(", ", array_map('idf_escape', $index['columns'])) . ")");
-		}
-		return $return;
-	}
-	*/
-
 	/** Get SQL command to truncate table
 	* @param string
 	* @return string
 	*/
-	/*not work
 	function truncate_sql($table) {
 		return "TRUNCATE " . table($table);
-	}*/
-
-	//from sqlite
-	function truncate_sql($table) {
-		return "DELETE FROM " . table($table);
 	}
 
-	//!!!50/50!!! sqlite - have, but empty
 	/** Get SQL command to change database
 	* @param string
 	* @return string
@@ -1554,31 +1041,14 @@ if (!defined("DRIVER")) {
 	* @param string
 	* @return string
 	*/
-	/*not working query
 	function trigger_sql($table) {
 		$return = "";
 		foreach (get_rows("SHOW TRIGGERS LIKE " . q(addcslashes($table, "%_\\")), null, "-- ") as $row) {
 			$return .= "\nCREATE TRIGGER " . idf_escape($row["Trigger"]) . " $row[Timing] $row[Event] ON " . table($row["Table"]) . " FOR EACH ROW\n$row[Statement];;\n";
 		}
 		return $return;
-	}*/
-
-	//from sqlite
-	function trigger_sql($table) {
-		return implode(get_vals("SELECT sql || ';;\n' FROM sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)));
 	}
 
-	//work, but sqlite different
-	/*
-	function show_variables() {
-		global $connection;
-		$return = array();
-		foreach (array("auto_vacuum", "cache_size", "count_changes", "default_cache_size", "empty_result_callbacks", "encoding", "foreign_keys", "full_column_names", "fullfsync", "journal_mode", "journal_size_limit", "legacy_file_format", "locking_mode", "page_size", "max_page_count", "read_uncommitted", "recursive_triggers", "reverse_unordered_selects", "secure_delete", "short_column_names", "synchronous", "temp_store", "temp_store_directory", "schema_version", "integrity_check", "quick_check") as $key) {
-			$return[$key] = $connection->result("PRAGMA $key");
-		}
-		return $return;
-	}
-	*/
 	/** Get server variables
 	* @return array ($name => $value)
 	*/
@@ -1586,7 +1056,6 @@ if (!defined("DRIVER")) {
 		return get_key_vals("SHOW VARIABLES");
 	}
 
-	//work
 	/** Get process list
 	* @return array ($row)
 	*/
@@ -1597,23 +1066,10 @@ if (!defined("DRIVER")) {
 	/** Get status variables
 	* @return array ($name => $value)
 	*/
-	/*not working query
 	function show_status() {
 		return get_key_vals("SHOW STATUS");
 	}
-	*/
 
-	//from sqlite
-	function show_status() {
-		$return = array();
-		foreach (get_vals("PRAGMA compile_options") as $option) {
-			list($key, $val) = explode("=", $option, 2);
-			$return[$key] = $val;
-		}
-		return $return;
-	}
-
-	//WTF?!-sqlite have but empty
 	/** Convert field in select and edit
 	* @param array one element from fields()
 	* @return string
@@ -1630,7 +1086,6 @@ if (!defined("DRIVER")) {
 		}
 	}
 
-	//WTF?!-sqlite have but empty
 	/** Convert value in edit after applying functions back
 	* @param array one element from fields()
 	* @param string
@@ -1654,16 +1109,10 @@ if (!defined("DRIVER")) {
 	* @param string "comment", "copy", "database", "descidx", "drop_col", "dump", "event", "indexes", "kill", "materializedview", "partitioning", "privileges", "procedure", "processlist", "routine", "scheme", "sequence", "status", "table", "trigger", "type", "variables", "view", "view_trigger"
 	* @return bool
 	*/
-	/*function support($feature) {
-		return !preg_match("~scheme|sequence|type|view_trigger|materializedview" . (min_version(8) ? "" : "|descidx" . (min_version(5.1) ? "" : "|event|partitioning" . (min_version(5) ? "" : "|routine|trigger|view"))) . "~", $feature);
-	}*/
-
-	//50/50from_sqlite+processlist|kill
 	function support($feature) {
-		return preg_match('~^(columns|database|drop_col|dump|indexes|descidx|move_col|sql|status|table|trigger|variables|view|view_trigger|processlist|kill)$~', $feature);
+		return !preg_match("~scheme|sequence|type|view_trigger|materializedview" . (min_version(8) ? "" : "|descidx" . (min_version(5.1) ? "" : "|event|partitioning" . (min_version(5) ? "" : "|routine|trigger|view"))) . "~", $feature);
 	}
 
-	//need test by highload server
 	/** Kill a process
 	* @param int
 	* @return bool
@@ -1672,7 +1121,6 @@ if (!defined("DRIVER")) {
 		return queries("KILL " . number($val));
 	}
 
-	//query work
 	/** Return query to get connection ID
 	* @return string
 	*/
@@ -1680,7 +1128,6 @@ if (!defined("DRIVER")) {
 		return "SELECT CONNECTION_ID()";
 	}
 
-	//WTF?!
 	/** Get maximum number of connections
 	* @return int
 	*/
@@ -1689,7 +1136,6 @@ if (!defined("DRIVER")) {
 		return $connection->result("SELECT @@max_connections");
 	}
 
-	//HARD-LAST
 	/** Get driver config
 	* @return array array('possible_drivers' => , 'jush' => , 'types' => , 'structured_types' => , 'unsigned' => , 'operators' => , 'functions' => , 'grouping' => , 'edit_functions' => )
 	*/
@@ -1709,7 +1155,7 @@ if (!defined("DRIVER")) {
 		}
 		return array(
 			'possible_drivers' => array("MySQLi", "MySQL", "PDO_MySQL"),
-			'jush' => "sqlite", ///< @var string JUSH identifier
+			'jush' => "sql", ///< @var string JUSH identifier
 			'types' => $types,
 			'structured_types' => $structured_types,
 			'unsigned' => array("unsigned", "zerofill", "unsigned zerofill"), ///< @var array number variants

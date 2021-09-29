@@ -16,6 +16,12 @@ if ($tables_views && !$error && !$_POST["search"]) {
 	} elseif ($_POST["move"]) {
 		$result = move_tables((array) $_POST["tables"], (array) $_POST["views"], $_POST["target"]);
 		$message = lang('Tables have been moved.');
+	} elseif ($_POST["save"]) {
+		$result = save_tables($_POST["item"], $_POST["target"]);
+		$message = "Saved";
+	} elseif ($_POST["load"]) {
+		$result = load_tables($_POST["item"], $_POST["target"]);
+		$message = "Loaded";
 	} elseif ($_POST["copy"]) {
 		$result = copy_tables((array) $_POST["tables"], (array) $_POST["views"], $_POST["target"]);
 		$message = lang('Tables have been copied.');
@@ -45,6 +51,20 @@ if ($tables_views && !$error && !$_POST["search"]) {
 }
 
 page_header(($_GET["ns"] == "" ? lang('Database') . ": " . h(DB) : lang('Schema') . ": " . h($_GET["ns"])), $error, true);
+
+$databases = (support("scheme") ? $adminer->schemas() : $adminer->databases());
+if (count($databases) == 5 && $jush == "sqlite" && $adminer->database() == "main") {
+	echo "<form action='' method='post'>\n";
+	echo "<p>ProxySQL: ";
+	echo checkbox("views", "", "1", "", "", "hidden", "");
+	echo (html_select("item", ["MYSQL SERVERS", "MYSQL VARIABLES", "MYSQL QUERY RULES", "MYSQL USERS"]));
+	echo " TO ";
+	echo (html_select("target", ["RUNTIME", "MEMORY", "DISK"]));
+	echo " <input id='proxysql' type='submit' name='save' value='SAVE'>";
+	echo " <input id='proxysql' type='submit' name='load' value='LOAD'>";
+	echo "<input type='hidden' name='token' value='$token'>\n";
+	echo "</form>\n";
+}
 
 if ($adminer->homepage()) {
 	if ($_GET["ns"] !== "") {
@@ -133,7 +153,6 @@ if ($adminer->homepage()) {
 				: "")))
 				. "<input type='submit' name='truncate' value='" . lang('Truncate') . "'> " . on_help($jush == "sqlite" ? "'DELETE'" : "'TRUNCATE" . ($jush == "pgsql" ? "'" : " TABLE'")) . confirm()
 				. "<input type='submit' name='drop' value='" . lang('Drop') . "'>" . on_help("'DROP TABLE'") . confirm() . "\n";
-				$databases = (support("scheme") ? $adminer->schemas() : $adminer->databases());
 				if (count($databases) != 1 && $jush != "sqlite") {
 					$db = (isset($_POST["target"]) ? $_POST["target"] : (support("scheme") ? $_GET["ns"] : DB));
 					echo "<p>" . lang('Move to other database') . ": ";
