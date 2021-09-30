@@ -27,8 +27,8 @@ class ProxysqlSaveLoad {
 			echo (html_select("item", ["MYSQL SERVERS", "MYSQL VARIABLES", "MYSQL QUERY RULES", "MYSQL USERS"]));
 			echo " TO ";
 			echo (html_select("target", ["RUNTIME", "MEMORY", "DISK"]));
-			echo " <input class='proxysql' id='proxysql' type='submit' name='saveload' value='SAVE'>";
-			echo " <input class='proxysql' id='proxysql' type='submit' name='saveload' value='LOAD'>";
+			echo " <input type='submit' name='saveload' value='SAVE'>";
+			echo " <input type='submit' name='saveload' value='LOAD'>";
 			echo "</form>\n";
 		}
 	}	
