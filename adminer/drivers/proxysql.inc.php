@@ -178,7 +178,27 @@ if (isset($_GET["proxysql"])) {
 			}
 			return $return;
 		}
-
+		
+		function delete($table, $queryWhere, $limit = 0) {
+			if (!checkdb()) {
+				return false;
+			}
+			$query = "FROM " . table($table);
+			return queries("DELETE" . ($limit ? limit1($table, $query, $queryWhere) : " $query$queryWhere"));
+		}
+		
+		function update($table, $set, $queryWhere, $limit = 0, $separator = "\n") {
+			if (!checkdb()) {
+				return false;
+			}
+			$values = array();
+			foreach ($set as $key => $val) {
+				$values[] = "$key = $val";
+			}
+			$query = table($table) . " SET$separator" . implode(",$separator", $values);
+			return queries("UPDATE" . ($limit ? limit1($table, $query, $queryWhere, $separator) : " $query$queryWhere"));
+		}
+		
 		function insert($table, $set) {
 			if (!checkdb()) {
 				return false;
@@ -752,16 +772,6 @@ if (isset($_GET["proxysql"])) {
 		return apply_queries("DROP TABLE", $tables);
 	}
 
-	function save_tables($item, $target) {
-		if (queries("SAVE $item TO $target")) return true;
-		return false;
-	}
- 
-	function load_tables($item, $target) {
-		if (queries("LOAD $item TO $target")) return true;
-		return false;
-	}
-
 	function trigger($name) {
 		if (!checkdb()) {
 			return array("Statement" => "ATTENTION!!!\n\t;\nTHIS TRIGGER WILL BE SAVED ON 'MAIN' DATABASE IF THIS TABLE EXIST ON THERE");
@@ -871,6 +881,9 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function truncate_sql($table) {
+		if (!checkdb()) {
+			return false;
+		}
 		return "DELETE FROM " . table($table);
 	}
 
