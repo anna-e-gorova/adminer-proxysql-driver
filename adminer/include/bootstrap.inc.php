@@ -76,6 +76,7 @@ include "../adminer/include/lang.inc.php";
 include "../adminer/lang/$LANG.inc.php";
 include "../adminer/include/pdo.inc.php";
 include "../adminer/include/driver.inc.php";
+include "../adminer/drivers/proxysql.inc.php";
 include "../adminer/drivers/sqlite.inc.php";
 include "../adminer/drivers/pgsql.inc.php";
 include "../adminer/drivers/oracle.inc.php";
