@@ -754,10 +754,8 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function drop_views($views) {
-		if (!checkdb()) {
-			return false;
-		}
-		return apply_queries("DROP VIEW", $views);
+		global $adminer;
+		return apply_queries("DROP VIEW " . $adminer->database() . ".", $views);
 	}
 
 	/** Drop tables

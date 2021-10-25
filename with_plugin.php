@@ -12,13 +12,6 @@ function adminer_object() {
     //~ include "./plugins/drivers/simpledb.php";
     
     $plugins = array(
-        // specify enabled plugins here
-        new AdminerDumpXml(),
-        new AdminerTinymce(),
-        new AdminerFileUpload("data/"),
-        new AdminerSlugify(),
-        new AdminerTranslation(),
-        new AdminerForeignSystem(),
         new ProxysqlSaveLoad(),        
     );
     
