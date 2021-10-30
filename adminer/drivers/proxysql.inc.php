@@ -164,7 +164,7 @@ if (isset($_GET["proxysql"])) {
 			$query = $adminer->selectQueryBuild($select, $where, $group, $order, $limit, $page);
 			if (!$query) {
 				$query = "SELECT" . limit(
-					($_GET["page"] != "last" && $limit != "" && $group && $is_group && $jush == "sql" ? "SQL_CALC_FOUND_ROWS " : "") . implode(", ", $select) . "\nFROM " . $adminer->database() . "." . table($table),
+					($_GET["page"] != "last" && $limit != "" && $group && $is_group && $jush == "sql" ? "SQL_CALC_FOUND_ROWS " : "") . implode(", ", $select) . "\nFROM " . table($table),
 					($where ? "\nWHERE " . implode(" AND ", $where) : "") . ($group && $is_group ? "\nGROUP BY " . implode(", ", $group) : "") . ($order ? "\nORDER BY " . implode(", ", $order) : ""),
 					($limit != "" ? +$limit : null),
 					($page ? $limit * $page : 0),
@@ -179,37 +179,7 @@ if (isset($_GET["proxysql"])) {
 			return $return;
 		}
 		
-		function delete($table, $queryWhere, $limit = 0) {
-			if (!checkdb()) {
-				return false;
-			}
-			$query = "FROM " . table($table);
-			return queries("DELETE" . ($limit ? limit1($table, $query, $queryWhere) : " $query$queryWhere"));
-		}
-		
-		function update($table, $set, $queryWhere, $limit = 0, $separator = "\n") {
-			if (!checkdb()) {
-				return false;
-			}
-			$values = array();
-			foreach ($set as $key => $val) {
-				$values[] = "$key = $val";
-			}
-			$query = table($table) . " SET$separator" . implode(",$separator", $values);
-			return queries("UPDATE" . ($limit ? limit1($table, $query, $queryWhere, $separator) : " $query$queryWhere"));
-		}
-		
-		function insert($table, $set) {
-			if (!checkdb()) {
-				return false;
-			}
-			return ($set ? parent::insert($table, $set) : queries("INSERT INTO " . table($table) . " ()\nVALUES ()"));
-		}
-
 		function insertUpdate($table, $rows, $primary) {
-			if (!checkdb()) {
-				return false;
-			}
 			$values = array();
 			foreach ($rows as $set) {
 				$values[] = "(" . implode(", ", $set) . ")";
@@ -245,16 +215,6 @@ if (isset($_GET["proxysql"])) {
 
 	}
 
-	function checkdb() {
-		global $adminer;
-		if ($adminer->database() != "main") {
-			return false;
-		}
-		else {
-			return true;
-		}
-	}
-
 	/** Escape database identifier
 	* @param string
 	* @return string
@@ -267,8 +227,14 @@ if (isset($_GET["proxysql"])) {
 	* @param string
 	* @return string
 	*/
-	function table($idf) {
-		return idf_escape($idf);
+	function table($idf,$allow) {
+		global $adminer;
+		$caller = debug_backtrace()[1]['function'];
+		$return = idf_escape($idf);
+		if (($adminer->database() != 'main')&&(!$allow)&&($caller != "format_foreign_key"||"index_sql")) {
+			$return = $adminer->database() . "." . $return;
+		}
+		return $return;
 	}
 
 	/** Connect to the database
@@ -398,7 +364,7 @@ if (isset($_GET["proxysql"])) {
 		global $connection;
 		$return = array();
 		$primary = "";
-		foreach (get_rows("PRAGMA table_info(" . table($table) . ")") as $row) {
+		foreach (get_rows("PRAGMA " . $adminer->database() . ".table_info(" . $table . ")") as $row) {
 			$name = $row["name"];
 			$type = strtolower($row["type"]);
 			$default = $row["dflt_value"];
@@ -455,12 +421,12 @@ if (isset($_GET["proxysql"])) {
 			}
 		}
 		$sqls = get_key_vals("SELECT name, sql FROM " . $adminer->database() . ".sqlite_master WHERE type = 'index' AND tbl_name = " . q($table), $connection2);
-		foreach (get_rows("PRAGMA index_list(" . table($table) . ")", $connection2) as $row) {
+		foreach (get_rows("PRAGMA " . $adminer->database() . ".index_list(" . $table . ")", $connection2) as $row) {
 			$name = $row["name"];
 			$index = array("type" => ($row["unique"] ? "UNIQUE" : "INDEX"));
 			$index["lengths"] = array();
 			$index["descs"] = array();
-			foreach (get_rows("PRAGMA index_info(" . idf_escape($name) . ")", $connection2) as $row1) {
+			foreach (get_rows("PRAGMA " . $adminer->database() . ".index_info(" . idf_escape($name) . ")", $connection2) as $row1) {
 				$index["columns"][] = $row1["name"];
 				$index["descs"][] = null;
 			}
@@ -480,8 +446,9 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function foreign_keys($table) {
+		global $adminer;
 		$return = array();
-		foreach (get_rows("PRAGMA foreign_key_list(" . table($table) . ")") as $row) {
+		foreach (get_rows("PRAGMA " . $adminer->database() . ".foreign_key_list(" . $table . ")") as $row) {
 			$foreign_key = &$return[$row["id"]];
 			//! idf_unescape in SQLite2
 			if (!$foreign_key) {
@@ -561,10 +528,7 @@ if (isset($_GET["proxysql"])) {
 		return " PRIMARY KEY" . (DRIVER == "sqlite" ? " AUTOINCREMENT" : "");
 	}
 
-	function alter_table($table, $name, $fields, $foreign, $comment, $engine, $collation, $auto_increment, $partitioning) {
-		if (!checkdb()) {
-			return false;
-		}	
+	function alter_table($table, $name, $fields, $foreign, $comment, $engine, $collation, $auto_increment, $partitioning) {	
 		global $connection;
 		$use_all_fields = ($table == "" || $foreign);
 		foreach ($fields as $field) {
@@ -590,7 +554,7 @@ if (isset($_GET["proxysql"])) {
 					return false;
 				}
 			}
-			if ($table != $name && !queries("ALTER TABLE " . table($table) . " RENAME TO " . table($name))) {
+			if ($table != $name && !queries("ALTER TABLE " . table($table) . " RENAME TO " . table($name, 1))) {
 				return false;
 			}
 		} elseif (!recreate_table($table, $name, $alter, $originals, $foreign, $auto_increment)) {
@@ -608,9 +572,6 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function recreate_table($table, $name, $fields, $originals, $foreign, $auto_increment, $indexes = array()) {
-		if (!checkdb()) {
-			return false;
-		}
 		global $connection;
 		if ($table != "") {
 			if (!$fields) {
@@ -689,7 +650,7 @@ if (isset($_GET["proxysql"])) {
 			}
 			$auto_increment = $auto_increment ? 0 : $connection->result("SELECT seq FROM sqlite_sequence WHERE name = " . q($table)); // if $auto_increment is set then it will be updated later
 			if (!queries("DROP TABLE " . table($table)) // drop before creating indexes and triggers to allow using old names
-				|| ($table == $name && !queries("ALTER TABLE " . table($temp_name) . " RENAME TO " . table($name)))
+				|| ($table == $name && !queries("ALTER TABLE " . table($temp_name) . " RENAME TO " . table($name, 1)))
 				|| !alter_indexes($name, $indexes)
 			) {
 				return false;
@@ -717,9 +678,6 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function alter_indexes($table, $alter) {
-		if (!checkdb()) {
-			return false;
-		}
 		foreach ($alter as $primary) {
 			if ($primary[0] == "PRIMARY") {
 				return recreate_table($table, $table, array(), array(), array(), 0, $alter);
@@ -742,9 +700,6 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function truncate_tables($tables) {
-		if (!checkdb()) {
-			return false;
-		}
 		return apply_queries("DELETE FROM", $tables);
 	}
 
@@ -755,7 +710,7 @@ if (isset($_GET["proxysql"])) {
 
 	function drop_views($views) {
 		global $adminer;
-		return apply_queries("DROP VIEW " . $adminer->database() . ".", $views);
+		return apply_queries("DROP VIEW", $views);
 	}
 
 	/** Drop tables
@@ -764,16 +719,10 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function drop_tables($tables) {
-		if (!checkdb()) {
-			return false;
-		}
 		return apply_queries("DROP TABLE", $tables);
 	}
 
 	function trigger($name) {
-		if (!checkdb()) {
-			return array("Statement" => "ATTENTION!!!\n\t;\nTHIS TRIGGER WILL BE SAVED ON 'MAIN' DATABASE IF THIS TABLE EXIST ON THERE");
-		}
 		global $adminer;
 		global $connection;
 		if ($name == "") {
@@ -879,9 +828,6 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function truncate_sql($table) {
-		if (!checkdb()) {
-			return false;
-		}
 		return "DELETE FROM " . table($table);
 	}
 
@@ -934,6 +880,10 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function support($feature) {
+		global $adminer;
+		if ($adminer->database() != "main"){
+			return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|variables|view|view_trigger|processlist)$~', $feature);
+		}
 		return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|trigger|variables|view|view_trigger|processlist)$~', $feature);
 	}
 

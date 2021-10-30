@@ -21,9 +21,9 @@ if ($_POST && !$error) {
 		$temp_name = $name . "_adminer_" . uniqid();
 		drop_create(
 			"DROP $orig_type " . table($TABLE),
-			"CREATE $type " . ($jush == "sqlite" && $adminer->databases() ? $adminer->database() . "." : "") . table($name) . $as,
+			"CREATE $type " . table($name) . $as,
 			"DROP $type " . table($name),
-			"CREATE $type " . ($jush == "sqlite" && $adminer->databases() ? $adminer->database() . "." : "") . table($temp_name) . $as,
+			"CREATE $type " . table($temp_name) . $as,
 			"DROP $type " . table($temp_name),
 			($_POST["drop"] ? substr(ME, 0, -1) : $location),
 			lang('View has been dropped.'),
