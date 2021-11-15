@@ -4,158 +4,57 @@ $drivers["proxysql"] = "ProxySQL";
 if (isset($_GET["proxysql"])) {
 	define("DRIVER", "proxysql"); // server - backwards compatibility
 	// MySQLi supports everything, MySQL doesn't support multiple result sets, PDO_MySQL doesn't support orgtable
-	if (extension_loaded("mysqli")) {
-		class Min_DB extends MySQLi {
-			var $extension = "ProxySQL";
+	class Min_DB extends MySQLi {
+		var $extension = "ProxySQL";
 
-			function __construct() {
-				parent::init();
-			}
-
-			function connect($server = "", $username = "", $password = "", $database = null, $port = null, $socket = null) {
-				global $adminer;
-				mysqli_report(MYSQLI_REPORT_OFF); // stays between requests, not required since PHP 5.3.4
-				list($host, $port) = explode(":", $server, 2); // part after : is used for port or socket
-				$ssl = $adminer->connectSsl();
-				if ($ssl) {
-					$this->ssl_set($ssl['key'], $ssl['cert'], $ssl['ca'], '', '');
-				}
-				$return = @$this->real_connect(
-					($server != "" ? $host : ini_get("mysqli.default_host")),
-					($server . $username != "" ? $username : ini_get("mysqli.default_user")),
-					($server . $username . $password != "" ? $password : ini_get("mysqli.default_pw")),
-					$database,
-					(is_numeric($port) ? $port : ini_get("mysqli.default_port")),
-					(!is_numeric($port) ? $port : $socket),
-					($ssl ? 64 : 0) // 64 - MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT (not available before PHP 5.6.16)
-				);
-				$this->options(MYSQLI_OPT_LOCAL_INFILE, false);
-				return $return;
-			}
-
-			function set_charset($charset) {
-				if (parent::set_charset($charset)) {
-					return true;
-				}
-				// the client library may not support utf8mb4
-				parent::set_charset('utf8');
-				return $this->query("SET NAMES $charset");
-			}
-
-			function result($query, $field = 0) {
-				$result = $this->query($query);
-				if (!$result) {
-					return false;
-				}
-				$row = $result->fetch_array();
-				return $row[$field];
-			}
-			
-			function quote($string) {
-				return "'" . $this->escape_string($string) . "'";
-			}
+		function __construct() {
+			parent::init();
 		}
 
-	} elseif (extension_loaded("mysql") && !((ini_bool("sql.safe_mode") || ini_bool("mysql.allow_local_infile")) && extension_loaded("pdo_mysql"))) {
-		class Min_DB {
-
-			/** Select database
-			* @param string
-			* @return bool
-			*/
-			function select_db($database) {
-				return mysql_select_db($database, $this->_link);
+		function connect($server = "", $username = "", $password = "", $database = null, $port = null, $socket = null) {
+			global $adminer;
+			mysqli_report(MYSQLI_REPORT_OFF); // stays between requests, not required since PHP 5.3.4
+			list($host, $port) = explode(":", $server, 2); // part after : is used for port or socket
+			$ssl = $adminer->connectSsl();
+			if ($ssl) {
+				$this->ssl_set($ssl['key'], $ssl['cert'], $ssl['ca'], '', '');
 			}
+			$return = @$this->real_connect(
+				($server != "" ? $host : ini_get("mysqli.default_host")),
+				($server . $username != "" ? $username : ini_get("mysqli.default_user")),
+				($server . $username . $password != "" ? $password : ini_get("mysqli.default_pw")),
+				$database,
+				(is_numeric($port) ? $port : ini_get("mysqli.default_port")),
+				(!is_numeric($port) ? $port : $socket),
+				($ssl ? 64 : 0) // 64 - MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT (not available before PHP 5.6.16)
+			);
+			$this->options(MYSQLI_OPT_LOCAL_INFILE, false);
+			return $return;
+		}
 
-			/** Send query
-			* @param string
-			* @param bool
-			* @return mixed bool or Min_Result
-			*/
-			function query($query, $unbuffered = false) {
-				$result = @($unbuffered ? mysql_unbuffered_query($query, $this->_link) : mysql_query($query, $this->_link)); // @ - mute mysql.trace_mode
-				$this->error = "";
-				if (!$result) {
-					$this->errno = mysql_errno($this->_link);
-					$this->error = mysql_error($this->_link);
-					return false;
-				}
-				if ($result === true) {
-					$this->affected_rows = mysql_affected_rows($this->_link);
-					$this->info = mysql_info($this->_link);
-					return true;
-				}
-				return new Min_Result($result);
+		function set_charset($charset) {
+			if (parent::set_charset($charset)) {
+				return true;
 			}
+			// the client library may not support utf8mb4
+			parent::set_charset('utf8');
+			return $this->query("SET NAMES $charset");
+		}
 
-			/** Send query with more resultsets
-			* @param string
-			* @return bool
-			*/
-			function multi_query($query) {
-				return $this->_result = $this->query($query);
-			}
-
-			/** Get current resultset
-			* @return Min_Result
-			*/
-			function store_result() {
-				return $this->_result;
-			}
-
-			/** Fetch next resultset
-			* @return bool
-			*/
-			function next_result() {
-				// MySQL extension doesn't support multiple results
+		function result($query, $field = 0) {
+			$result = $this->query($query);
+			if (!$result) {
 				return false;
 			}
-
+			$row = $result->fetch_array();
+			return $row[$field];
 		}
-
-		class Min_Result {
-			var $_result, $_offset = 0, $num_rows;
-
-			function __construct($result) {
-				$this->_result = $result;
-				if (method_exists($result, 'numRows')) { // not available in unbuffered query
-					$this->num_rows = $result->numRows();
-				}
-			}
-
-			function fetch_assoc() {
-				$row = $this->_result->fetch(SQLITE_ASSOC);
-				if (!$row) {
-					return false;
-				}
-				$return = array();
-				foreach ($row as $key => $val) {
-					$return[idf_unescape($key)] = $val;
-				}
-				return $return;
-			}
-
-			function fetch_row() {
-				return $this->_result->fetch(SQLITE_NUM);
-			}
-
-			function fetch_field() {
-				$name = $this->_result->fieldName($this->_offset++);
-				$pattern = '(\[.*]|"(?:[^"]|"")*"|(.+))';
-				if (preg_match("~^($pattern\\.)?$pattern\$~", $name, $match)) {
-					$table = ($match[3] != "" ? $match[3] : idf_unescape($match[2]));
-					$name = ($match[5] != "" ? $match[5] : idf_unescape($match[4]));
-				}
-				return (object) array(
-					"name" => $name,
-					"orgname" => $name,
-					"orgtable" => $table,
-				);
-			}
-
+			
+		function quote($string) {
+			return "'" . $this->escape_string($string) . "'";
 		}
-
-	} 
+	}
+  
 	class Min_Driver extends Min_SQL {
 
 		function select($table, $select, $where, $group, $order = array(), $limit = 1, $page = 0, $print = false) {
@@ -215,6 +114,11 @@ if (isset($_GET["proxysql"])) {
 
 	}
 
+	function currentDB() {
+		global $adminer;
+		return $adminer->database();
+	}
+
 	/** Escape database identifier
 	* @param string
 	* @return string
@@ -227,14 +131,13 @@ if (isset($_GET["proxysql"])) {
 	* @param string
 	* @return string
 	*/
-	function table($idf,$allow) {
-		global $adminer;
-		$caller = debug_backtrace()[1]['function'];
-		$return = idf_escape($idf);
-		if (($adminer->database() != 'main')&&(!$allow)&&($caller != "format_foreign_key"||"index_sql")) {
-			$return = $adminer->database() . "." . $return;
+	function table($idf) {
+		if (currentDB() === "main") {
+			return idf_escape($idf);
 		}
-		return $return;
+		else {
+			return idf_escape(currentDB()) . "." . idf_escape($idf);
+		}
 	}
 
 	/** Connect to the database
@@ -316,12 +219,11 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function logged_user() {
-		return get_current_user(); // should return effective user filesystem
+		return $_GET["username"]; 
 	}
 
 	function tables_list() {
-		global $adminer;
-		return get_key_vals("SELECT name, type FROM " . $adminer->database() . ".sqlite_master WHERE type IN ('table', 'view') ORDER BY (name = 'sqlite_sequence'), name");
+		return get_key_vals("SELECT name, type FROM " . currentDB() . ".sqlite_master WHERE type IN ('table', 'view') ORDER BY (name = 'sqlite_sequence'), name");
 	}
 
 	/** Count tables in all databases
@@ -338,13 +240,12 @@ if (isset($_GET["proxysql"])) {
 
 	function table_status($name = "") {
 		global $connection;
-		global $adminer;
 		$return = array();
-		foreach (get_rows("SELECT name AS Name, type AS Engine, 'rowid' AS Oid, '' AS Auto_increment FROM " . $adminer->database() . ".sqlite_master WHERE type IN ('table', 'view') " . ($name != "" ? "AND name = " . q($name) : "ORDER BY name")) as $row) {
-			$row["Rows"] = $connection->result("SELECT COUNT(*) FROM " . $adminer->database() . "." . idf_escape($row["Name"]));
+		foreach (get_rows("SELECT name AS Name, type AS Engine, 'rowid' AS Oid, '' AS Auto_increment FROM " . currentDB() . ".sqlite_master WHERE type IN ('table', 'view') " . ($name != "" ? "AND name = " . q($name) : "ORDER BY name")) as $row) {
+			$row["Rows"] = $connection->result("SELECT COUNT(*) FROM " . currentDB() . "." . idf_escape($row["Name"]));
 			$return[$row["Name"]] = $row;
 		}
-		foreach (get_rows("SELECT * FROM " . $adminer->database() . ".sqlite_sequence", null, "") as $row) {
+		foreach (get_rows("SELECT * FROM " . currentDB() . ".sqlite_sequence", null, "") as $row) {
 			$return[$row["name"]]["Auto_increment"] = $row["seq"];
 		}
 		return ($name != "" ? $return[$name] : $return);
@@ -360,11 +261,10 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function fields($table) {
-		global $adminer;
 		global $connection;
 		$return = array();
 		$primary = "";
-		foreach (get_rows("PRAGMA " . $adminer->database() . ".table_info(" . $table . ")") as $row) {
+		foreach (get_rows("PRAGMA " . currentDB() . ".table_info(" . $table . ")") as $row) {
 			$name = $row["name"];
 			$type = strtolower($row["type"]);
 			$default = $row["dflt_value"];
@@ -386,7 +286,7 @@ if (isset($_GET["proxysql"])) {
 				$primary = $name;
 			}
 		}
-		$sql = $connection->result("SELECT sql FROM " . $adminer->database() . ".sqlite_master WHERE type = 'table' AND name = " . q($table));
+		$sql = $connection->result("SELECT sql FROM " . currentDB() . ".sqlite_master WHERE type = 'table' AND name = " . q($table));
 		preg_match_all('~(("[^"]*+")+|[a-z0-9_]+)\s+text\s+COLLATE\s+(\'[^\']+\'|\S+)~i', $sql, $matches, PREG_SET_ORDER);
 		foreach ($matches as $match) {
 			$name = str_replace('""', '"', preg_replace('~^"|"$~', '', $match[1]));
@@ -398,13 +298,12 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function indexes($table, $connection2 = null) {
-		global $adminer;
 		global $connection;
 		if (!is_object($connection2)) {
 			$connection2 = $connection;
 		}
 		$return = array();
-		$sql = $connection2->result("SELECT sql FROM " . $adminer->database() . ".sqlite_master WHERE type = 'table' AND name = " . q($table));
+		$sql = $connection2->result("SELECT sql FROM " . currentDB() . ".sqlite_master WHERE type = 'table' AND name = " . q($table));
 		if (preg_match('~\bPRIMARY\s+KEY\s*\((([^)"]+|"[^"]*"|`[^`]*`)++)~i', $sql, $match)) {
 			$return[""] = array("type" => "PRIMARY", "columns" => array(), "lengths" => array(), "descs" => array());
 			preg_match_all('~((("[^"]*+")+|(?:`[^`]*+`)+)|(\S+))(\s+(ASC|DESC))?(,\s*|$)~i', $match[1], $matches, PREG_SET_ORDER);
@@ -420,13 +319,13 @@ if (isset($_GET["proxysql"])) {
 				}
 			}
 		}
-		$sqls = get_key_vals("SELECT name, sql FROM " . $adminer->database() . ".sqlite_master WHERE type = 'index' AND tbl_name = " . q($table), $connection2);
-		foreach (get_rows("PRAGMA " . $adminer->database() . ".index_list(" . $table . ")", $connection2) as $row) {
+		$sqls = get_key_vals("SELECT name, sql FROM " . currentDB() . ".sqlite_master WHERE type = 'index' AND tbl_name = " . q($table), $connection2);
+		foreach (get_rows("PRAGMA " . currentDB() . ".index_list(" . $table . ")", $connection2) as $row) {
 			$name = $row["name"];
 			$index = array("type" => ($row["unique"] ? "UNIQUE" : "INDEX"));
 			$index["lengths"] = array();
 			$index["descs"] = array();
-			foreach (get_rows("PRAGMA " . $adminer->database() . ".index_info(" . idf_escape($name) . ")", $connection2) as $row1) {
+			foreach (get_rows("PRAGMA " . currentDB() . ".index_info(" . idf_escape($name) . ")", $connection2) as $row1) {
 				$index["columns"][] = $row1["name"];
 				$index["descs"][] = null;
 			}
@@ -446,9 +345,8 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function foreign_keys($table) {
-		global $adminer;
 		$return = array();
-		foreach (get_rows("PRAGMA " . $adminer->database() . ".foreign_key_list(" . $table . ")") as $row) {
+		foreach (get_rows("PRAGMA " . currentDB() . ".foreign_key_list(" . $table . ")") as $row) {
 			$foreign_key = &$return[$row["id"]];
 			//! idf_unescape in SQLite2
 			if (!$foreign_key) {
@@ -461,9 +359,8 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function view($name) {
-		global $adminer;
 		global $connection;
-		return array("select" => preg_replace('~^(?:[^`"[]+|`[^`]*`|"[^"]*")* AS\s+~iU', '', $connection->result("SELECT sql FROM " . $adminer->database() . ".sqlite_master WHERE name = " . q($name)))); //! identifiers may be inside []
+		return array("select" => preg_replace('~^(?:[^`"[]+|`[^`]*`|"[^"]*")* AS\s+~iU', '', $connection->result("SELECT sql FROM " . currentDB() . ".sqlite_master WHERE name = " . q($name)))); //! identifiers may be inside []
 	}
 
 	/** Get sorted grouped list of collations
@@ -497,31 +394,13 @@ if (isset($_GET["proxysql"])) {
 		return h(preg_replace('~^You have an error.*syntax to use~U', "Syntax error", $connection->error));
 	}
 
-	/** Create database
-	* @param string
-	* @param string
-	* @return string
-	*/
 	function create_database($db, $collation) {
 	}
 	
-	/** Drop databases
-	* @param array
-	* @return bool
-	*/
 	function drop_databases($databases) {
-		$return = false;
-		return $return;
 	}
 	
-	/** Rename database from DB
-	* @param string new name
-	* @param string
-	* @return bool
-	*/
 	function rename_database($name, $collation) {
-		$return = false;
-		return $return;
 	}
 	
 	function auto_increment() {
@@ -554,7 +433,7 @@ if (isset($_GET["proxysql"])) {
 					return false;
 				}
 			}
-			if ($table != $name && !queries("ALTER TABLE " . table($table) . " RENAME TO " . table($name, 1))) {
+			if ($table != $name && !queries("ALTER TABLE " . table($table) . " RENAME TO " . table($name))) {
 				return false;
 			}
 		} elseif (!recreate_table($table, $name, $alter, $originals, $foreign, $auto_increment)) {
@@ -573,6 +452,9 @@ if (isset($_GET["proxysql"])) {
 
 	function recreate_table($table, $name, $fields, $originals, $foreign, $auto_increment, $indexes = array()) {
 		global $connection;
+		if (currentDB() != "main") {
+			 return false;
+		}
 		if ($table != "") {
 			if (!$fields) {
 				foreach (fields($table) as $key => $field) {
@@ -650,7 +532,7 @@ if (isset($_GET["proxysql"])) {
 			}
 			$auto_increment = $auto_increment ? 0 : $connection->result("SELECT seq FROM sqlite_sequence WHERE name = " . q($table)); // if $auto_increment is set then it will be updated later
 			if (!queries("DROP TABLE " . table($table)) // drop before creating indexes and triggers to allow using old names
-				|| ($table == $name && !queries("ALTER TABLE " . table($temp_name) . " RENAME TO " . table($name, 1)))
+				|| ($table == $name && !queries("ALTER TABLE " . table($temp_name) . " RENAME TO " . table($name)))
 				|| !alter_indexes($name, $indexes)
 			) {
 				return false;
@@ -678,6 +560,9 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function alter_indexes($table, $alter) {
+		if (currentDB() != "main") {
+			return false;
+	   }
 		foreach ($alter as $primary) {
 			if ($primary[0] == "PRIMARY") {
 				return recreate_table($table, $table, array(), array(), array(), 0, $alter);
@@ -719,11 +604,13 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function drop_tables($tables) {
+		if (currentDB() != "main"){
+			return false;
+		}
 		return apply_queries("DROP TABLE", $tables);
 	}
 
 	function trigger($name) {
-		global $adminer;
 		global $connection;
 		if ($name == "") {
 			return array("Statement" => "BEGIN\n\t;\nEND");
@@ -732,7 +619,7 @@ if (isset($_GET["proxysql"])) {
 		$trigger_options = trigger_options();
 		preg_match(
 			"~^CREATE\\s+TRIGGER\\s*$idf\\s*(" . implode("|", $trigger_options["Timing"]) . ")\\s+([a-z]+)(?:\\s+OF\\s+($idf))?\\s+ON\\s*$idf\\s*(?:FOR\\s+EACH\\s+ROW\\s)?(.*)~is",
-			$connection->result("SELECT sql FROM " . $adminer->database() . ".sqlite_master WHERE type = 'trigger' AND name = " . q($name)),
+			$connection->result("SELECT sql FROM " . currentDB() . ".sqlite_master WHERE type = 'trigger' AND name = " . q($name)),
 			$match
 		);
 		$of = $match[3];
@@ -749,7 +636,7 @@ if (isset($_GET["proxysql"])) {
 		global $adminer;
 		$return = array();
 		$trigger_options = trigger_options();
-		foreach (get_rows("SELECT * FROM " . $adminer->database() . ".sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)) as $row) {
+		foreach (get_rows("SELECT * FROM " . currentDB() . ".sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)) as $row) {
 			preg_match('~^CREATE\s+TRIGGER\s*(?:[^`"\s]+|`[^`]*`|"[^"]*")+\s*(' . implode("|", $trigger_options["Timing"]) . ')\s*(.*?)\s+ON\b~i', $row["sql"], $match);
 			$return[$row["name"]] = array($match[1], $match[2]);
 		}
@@ -805,19 +692,13 @@ if (isset($_GET["proxysql"])) {
 		return "";
 	}
 
-	/** Set current schema
-	* @param string
-	* @param Min_DB
-	* @return bool
-	*/
 	function set_schema($schema, $connection2 = null) {
 		return true;
 	}
 
 	function create_sql($table, $auto_increment, $style) {
-		global $adminer;
 		global $connection;
-		$return = $connection->result("SELECT sql FROM " . $adminer->database() . ".sqlite_master WHERE type IN ('table', 'view') AND name = " . q($table));
+		$return = $connection->result("SELECT sql FROM " . currentDB() . ".sqlite_master WHERE type IN ('table', 'view') AND name = " . q($table));
 		foreach (indexes($table) as $name => $index) {
 			if ($name == '') {
 				continue;
@@ -840,8 +721,7 @@ if (isset($_GET["proxysql"])) {
 	}
 
 	function trigger_sql($table) {
-		global $adminer;
-		return implode(get_vals("SELECT sql || ';;\n' FROM " . $adminer->database() . ".sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)));
+		return implode(get_vals("SELECT sql || ';;\n' FROM " . currentDB() . ".sqlite_master WHERE type = 'trigger' AND tbl_name = " . q($table)));
 	}
 
 	/** Get server variables
@@ -880,9 +760,8 @@ if (isset($_GET["proxysql"])) {
 	*/
 
 	function support($feature) {
-		global $adminer;
-		if ($adminer->database() != "main"){
-			return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|variables|view|view_trigger|processlist)$~', $feature);
+		if (currentDB() != "main"){
+			return preg_match('~^(dump|indexes|sql|status|variables|view|view_trigger|trigger|processlist)$~', $feature);
 		}
 		return preg_match('~^(columns|drop_col|dump|indexes|descidx|move_col|sql|status|table|trigger|variables|view|view_trigger|processlist)$~', $feature);
 	}
