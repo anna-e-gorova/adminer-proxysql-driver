@@ -15,7 +15,8 @@ class ProxysqlSaveLoad {
 	function dumpData($table, $style, $query) {
 		$args = func_get_args();
 		$args[2] = str_replace("FROM ", " FROM " . idf_escape(currentDB()) . "." , $query);
-		AdminerPlugin::_callParent(__FUNCTION__, $args);	
+		$adminerPlugin = new AdminerPlugin;
+		$adminerPlugin->_callParent(__FUNCTION__, $args);	
 		return true;
 	}
 
