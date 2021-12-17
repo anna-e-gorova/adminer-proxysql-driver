@@ -12,6 +12,13 @@ class ProxysqlSaveLoad {
 		}	
 	}
 
+	function dumpData($table, $style, $query) {
+		$args = func_get_args();
+		$args[2] = str_replace("FROM ", " FROM " . idf_escape(currentDB()) . "." , $query);
+		AdminerPlugin::_callParent(__FUNCTION__, $args);	
+		return true;
+	}
+
 	function homepage() {
 		if ($this->postitem && $this->posttarget && $this->postaction){
 			$query = $this->postaction . " " . $this->postitem . " TO " . $this->posttarget;

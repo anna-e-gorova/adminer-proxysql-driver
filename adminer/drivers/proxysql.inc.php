@@ -132,7 +132,7 @@ if (isset($_GET["proxysql"])) {
 	* @return string
 	*/
 	function table($idf) {
-		if (currentDB() === "main") {
+		if (currentDB() === "main" || isset($_GET['dump'])) {
 			return idf_escape($idf);
 		}
 		else {
